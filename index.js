@@ -47,8 +47,15 @@ function saveSeen(seen) {
 }
 
 function jobKey(job) {
-  // Normalize the link to deduplicate across sources
+  // Primary key: normalized URL
   return (job.link || '').split('?')[0].toLowerCase().replace(/\/$/, '');
+}
+
+function jobTitleKey(job) {
+  // Secondary key: company + title (catches same job posted with different URLs or across sources)
+  const company = (job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const title = (job.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return `${company}::${title}`;
 }
 
 (async () => {
@@ -73,9 +80,22 @@ function jobKey(job) {
   const matched = filterAndRankJobs(allJobs);
   log(`Matched profile: ${matched.length} jobs`);
 
-  // 3. Filter out already-seen jobs
+  // 3. Filter out already-seen jobs (by URL and by company+title)
   const seen = loadSeen();
-  const newJobs = matched.filter(j => !seen[jobKey(j)]);
+  const seenTitles = new Set();
+  // Build title keys from already-seen URLs isn't possible, so we track within this run too
+  const newJobs = matched.filter(j => {
+    const urlKey = jobKey(j);
+    const tKey = jobTitleKey(j);
+    // Skip if URL already seen in previous runs
+    if (seen[urlKey]) return false;
+    // Skip if same company+title already seen in previous runs (different URL, same job)
+    if (seen[tKey]) return false;
+    // Skip if same company+title already in this batch (duplicate within one scrape)
+    if (seenTitles.has(tKey)) return false;
+    seenTitles.add(tKey);
+    return true;
+  });
   log(`New (unseen): ${newJobs.length} jobs`);
 
   // 4. Print results
@@ -96,9 +116,10 @@ function jobKey(job) {
     await sendBatchAlert(newJobs);
     await sendSummary(allJobs.length, matched.length, newJobs.length);
 
-    // Mark as seen
+    // Mark as seen (both URL and company+title keys)
     for (const job of newJobs) {
       seen[jobKey(job)] = Date.now();
+      seen[jobTitleKey(job)] = Date.now();
     }
     saveSeen(seen);
     log('Done. Jobs marked as seen.');
