@@ -25,41 +25,35 @@ async function sendMessage(text) {
   } catch (e) {
     log('Error: ' + e.message);
   }
-  // rate limit: max 30 messages/second for Telegram
   await new Promise(r => setTimeout(r, 200));
 }
 
-async function sendJobAlert(job) {
+function formatJob(job, idx) {
   const badge = job.isProductCompany ? ' ⭐' : '';
-  const skills = job.skillsMatched?.length ? `\n🛠 ${job.skillsMatched.join(', ')}` : '';
-  const salary = job.salary ? `\n💰 ${esc(job.salary)}` : '';
-  const loc = job.location ? `\n📍 ${esc(job.location)}` : '';
+  const skills = job.skillsMatched?.length ? `\n   🛠 ${job.skillsMatched.join(', ')}` : '';
+  const salary = job.salary ? `\n   💰 ${esc(job.salary)}` : '';
+  const loc = job.location ? ` | 📍 ${esc(job.location)}` : '';
+  const posted = job.posted ? `\n   🕐 ${formatDate(job.posted)}` : '';
 
-  const msg =
-    `💼 <b>${esc(job.title)}</b>${badge}\n` +
-    `🏢 ${esc(job.company || 'Unknown')}` +
-    salary + loc + skills + '\n' +
-    `🔗 <a href="${job.link}">Apply</a> | ${job.source}`;
-
-  await sendMessage(msg);
+  return `${idx}. <b>${esc(job.title)}</b>${badge}\n` +
+    `   🏢 ${esc(job.company || '?')}${loc}` +
+    salary + skills + posted + '\n' +
+    `   🔗 <a href="${job.link}">Apply</a> [${job.source}]`;
 }
 
 async function sendBatchAlert(jobs) {
-  // Send jobs in batches of 5 per message to reduce spam
+  // Send in batches of 5 per message
   const batches = [];
   for (let i = 0; i < jobs.length; i += 5) {
     batches.push(jobs.slice(i, i + 5));
   }
 
+  let count = 0;
   for (const batch of batches) {
-    const lines = batch.map((job, idx) => {
-      const badge = job.isProductCompany ? ' ⭐' : '';
-      const salary = job.salary ? ` | 💰 ${esc(job.salary)}` : '';
-      return `${idx + 1}. <b>${esc(job.title)}</b>${badge}\n` +
-        `   🏢 ${esc(job.company || '?')}${salary}\n` +
-        `   🔗 <a href="${job.link}">Apply</a> [${job.source}]`;
+    const lines = batch.map((job) => {
+      count++;
+      return formatJob(job, count);
     });
-
     await sendMessage(lines.join('\n\n'));
   }
 }
@@ -67,16 +61,30 @@ async function sendBatchAlert(jobs) {
 async function sendSummary(totalScraped, matched, newJobs) {
   await sendMessage(
     `📋 <b>Job Scout Report</b>\n\n` +
-    `🔍 Scraped: ${totalScraped} jobs\n` +
+    `🔍 Scraped: ${totalScraped} jobs (last 24h only)\n` +
     `✅ Matched profile: ${matched}\n` +
     `🆕 New jobs sent: ${newJobs}\n` +
-    `⭐ = Product company\n` +
-    `🕐 ${new Date().toLocaleString()}`
+    `⭐ = Product company | 💰 = Salary shown\n` +
+    `🕐 ${new Date().toLocaleString()}\n\n` +
+    `💼 Target: ${config.minCTC}-${config.maxCTC} LPA | DevOps/SRE/Cloud`
   );
+}
+
+function formatDate(d) {
+  if (!d) return '';
+  const date = new Date(typeof d === 'number' ? d * 1000 : d);
+  if (isNaN(date.getTime())) return '';
+  const now = Date.now();
+  const diff = now - date.getTime();
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  if (hours < 1) return 'Just now';
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function esc(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-module.exports = { sendMessage, sendJobAlert, sendBatchAlert, sendSummary };
+module.exports = { sendMessage, sendBatchAlert, sendSummary };

@@ -1,12 +1,13 @@
 /**
  * Remotive job scraper — uses the free public API (no auth needed).
- * Great for remote DevOps/SRE roles.
+ * Only includes jobs posted in the last 24 hours.
  */
 
 const log = (msg) => console.log(`[${new Date().toLocaleTimeString()}] [remotive] ${msg}`);
 
 async function scrapeRemotive(searchKeywords) {
   const allJobs = [];
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
   for (const keyword of searchKeywords) {
     try {
@@ -15,18 +16,24 @@ async function scrapeRemotive(searchKeywords) {
       if (!res.ok) { log(`HTTP ${res.status} for ${keyword}`); continue; }
 
       const data = await res.json();
-      const jobs = (data.jobs || []).map(j => ({
-        title: j.title || '',
-        company: j.company_name || '',
-        location: j.candidate_required_location || 'Remote',
-        link: j.url || '',
-        salary: j.salary || '',
-        posted: j.publication_date || '',
-        tags: (j.tags || []),
-        experience: '',
-        source: 'remotive',
-        searchKeyword: keyword,
-      }));
+      const jobs = (data.jobs || [])
+        .filter(j => {
+          // Filter: only jobs posted in the last 24 hours
+          if (!j.publication_date) return false;
+          return new Date(j.publication_date).getTime() > oneDayAgo;
+        })
+        .map(j => ({
+          title: j.title || '',
+          company: j.company_name || '',
+          location: j.candidate_required_location || 'Remote',
+          link: j.url || '',
+          salary: j.salary || '',
+          posted: j.publication_date || '',
+          tags: (j.tags || []),
+          experience: '',
+          source: 'remotive',
+          searchKeyword: keyword,
+        }));
 
       allJobs.push(...jobs);
       await sleep(500);
@@ -35,9 +42,8 @@ async function scrapeRemotive(searchKeywords) {
     }
   }
 
-  log(`Total: ${allJobs.length} jobs`);
+  log(`Total (last 24h): ${allJobs.length} jobs`);
 
-  // deduplicate by link
   const seen = new Set();
   return allJobs.filter(j => {
     if (seen.has(j.link)) return false;
